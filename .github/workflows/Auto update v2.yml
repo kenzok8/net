@@ -12,6 +12,9 @@ on:
 env:
   TZ: Asia/Shanghai
 
+permissions:
+  contents: write
+
 jobs:
   job_init:
     runs-on: ubuntu-latest
