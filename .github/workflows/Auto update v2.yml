@@ -1,0 +1,213 @@
+name: "Auto Update Net Packages"
+on:
+  repository_dispatch:
+  workflow_dispatch:
+    inputs:
+      ssh:
+        description: 'SSH connection to Actions'
+        required: false
+        default: 'false'
+  schedule:
+    - cron: "0 0 * * *"
+env:
+  TZ: Asia/Shanghai
+
+jobs:
+  job_init:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialization environment
+        run: |
+          sudo timedatectl set-timezone "$TZ"
+
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@main
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 1
+          keep_minimum_runs: 1
+        
+      - name: SSH connection to Actions
+        uses: kenzok78/ssh-action@master
+        if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
+
+  job_auto_update_net_packages:
+    needs: job_init
+    runs-on: ubuntu-latest
+    name: update-net-packages
+    strategy:
+      matrix:
+        package: [
+          '3proxy', 'ShadowVPN', 'aardvark-dns', 'acme-acmesh', 'acme-common', 'acme',
+          'adblock-fast', 'adblock', 'addrwatch', 'adguardhome', 'aggregate', 'aircrack-ng',
+          'ampr-ripd', 'amule', 'announce', 'antiblock', 'apache', 'apcupsd', 'apfree-wifidog',
+          'apinger', 'aria2', 'ariang', 'arp-scan', 'atftp', 'atlas-probe', 'atlas-sw-probe',
+          'autossh', 'banip', 'basicstation', 'bcp38', 'beanstalkd', 'bfdd', 'bind', 'bitlbee',
+          'bitsrunlogin-go', 'bmon', 'boinc-wrapper', 'boinc', 'bonding', 'bpfcountd', 'bridge-utils',
+          'brook', 'bwm-ng', 'bwping', 'cdnspeedtest', 'cgi-io', 'chaosvpn', 'chinadns-ng',
+          'chrony', 'cifs-utils', 'clamav', 'cloudflared', 'cloudreve', 'cni-route-override',
+          'conntrack-tools', 'conserver', 'coova-chilli', 'croc', 'crowdsec-firewall-bouncer',
+          'crowdsec', 'cshark', 'csshnpd', 'curl', 'daedae', 'daed', 'dante', 'darkstat', 'databag',
+          'davfs2', 'dawn', 'dcstadt', 'dcwapd', 'ddns-go', 'ddns-scripts', 'ddns-scripts_dnspod',
+          'dhcpcd', 'dhtd', 'dmapd', 'dns-over-https', 'dns2socks', 'dns2tcp', 'dnscrypt-proxy',
+          'dnscrypt-proxy2', 'dnsdist', 'dnsforwarder', 'dnslookup', 'dnsproxy', 'dnstap', 'dnstop',
+          'dufs', 'dynapoint', 'eoip', 'esniper', 'esp2net', 'etebase', 'etherwake-nfqueue',
+          'etherwake', 'evilginx2', 'external-protocol', 'fail2ban', 'fakeidentd', 'fakepop',
+          'family-dns', 'fastd', 'flent', 'foolsm', 'fping', 'freeradius3', 'frp', 'frr', 'fsh',
+          'fwknop', 'gateway-go', 'gatling', 'gensio', 'geoip-shell', 'geoipupdate', 'geoview',
+          'gg', 'git-lfs', 'git', 'gitolite', 'gnunet-fuse', 'gnunet', 'go-nats', 'go-wol', 'gost',
+          'gsocket', 'haproxy', 'hcxdumptool', 'hcxtools', 'hev-socks5-server', 'hev-socks5-tproxy',
+          'hev-socks5-tunnel', 'horst', 'hping3', 'hs20', 'htpdate', 'httping', 'https-dns-proxy',
+          'httptunnel', 'hysteria', 'i2pd', 'ibrdtn-tools', 'ibrdtnd', 'ieee8021xclient', 'ifstat',
+          'iftop', 'igmpproxy', 'inadyn', 'iodine', 'iperf', 'iperf3', 'ipset-lists', 'ipt2socks',
+          'iptraf-ng', 'iputils', 'ipvsadm', 'irssi', 'irtt', 'isc-dhcp', 'jool', 'kadnode',
+          'kafs-client', 'kcptun', 'kea', 'keepalived', 'knot-resolver', 'knot', 'knxd', 'kplex',
+          'krb5', 'ksmbd-tools', 'lcdringer', 'leech', 'lftp', 'libcurl-gnutls', 'libndp',
+          'librespeed-go', 'libreswan', 'lighttpd', 'linknx', 'linuxptp', 'lksctp-tools',
+          'lora-gateway-hal', 'lynx', 'mac-telnet', 'maccalc', 'mbusd', 'mdio-tools', 'mdns-repeater',
+          'mdnsresponder', 'memcached', 'microsocks', 'mikrotik-btest', 'mini_snmpd', 'minieap',
+          'miniupnpc', 'miniupnpd', 'modemband', 'modemmanager', 'mosdns', 'mosh', 'mosquitto',
+          'mptcpd', 'mrmctl', 'msd_lite', 'mtr', 'mwan3', 'n2n', 'naiveproxy', 'natmap', 'nbd',
+          'ncp', 'nebula', 'net-mtools', 'net-snmp', 'net-tools', 'netatalk', 'netavark', 'netbird',
+          'netcat', 'netdiscover', 'netifyd', 'netopeer2', 'netperf', 'netsniff-ng', 'netstinky',
+          'nextdns', 'nexttrace', 'nfdump', 'nfs-kernel-server', 'nginx-util', 'nginx', 'ngircd',
+          'ngrokc', 'njit8021xclient', 'nlbwmon', 'nmap', 'nps', 'nqptp', 'nsd', 'ntpd', 'ntripcaster',
+          'ntripclient', 'ntripserver', 'nut', 'obfs4proxy', 'ocserv', 'ola', 'onionshare-cli', 'oor',
+          'open-app-filter', 'open-iscsi', 'open-isns', 'openappid', 'openconnect', 'openelp',
+          'openfortivpn', 'openlist', 'openssh', 'openthread-br', 'opentracker', 'openvpn-easy-rsa',
+          'openvpn', 'openvswitch', 'oscam', 'ostiary', 'overture', 'ovn', 'ovsd', 'owipcalc', 'p910nd',
+          'pagekitec', 'pandownload-fake-server', 'pbr', 'pdns-recursor', 'pdns', 'pen', 'phantap',
+          'phytool', 'pingcheck', 'pixiewps', 'pppossh', 'pptpd', 'privoxy', 'prosody', 'proxychains-ng',
+          'ps3netsrv', 'ptunnel-ng', 'qq', 'qBittorrent-Enhanced-Edition', 'qcsuper', 'quectel-cm',
+          'radicale', 'radicale2', 'radius-mac', 'radsecproxy', 'ratched', 'ratechecker', 'ratelimit',
+          'rclone-ng', 'rclone-webui-react', 'rclone', 'reaver', 'redsocks', 'redsocks2', 'remserial',
+          'respondd', 'restic-rest-server', 'rp-pppoe', 'rpcbind', 'rsync', 'rtorrent', 'rustdesk-server',
+          'safe-search', 'samba4', 'samplicator', 'scapy', 'scutclient', 'ser2net', 'shadow-tls',
+          'shadowsocks-rust', 'shadowsocksr-libev', 'shorewall-core', 'shorewall-lite', 'shorewall',
+          'shorewall6-lite', 'shorewall6', 'siit', 'simple-captive-portal', 'simple-obfs', 'sing-box',
+          'slirp4netns', 'smartdns', 'smcroute', 'snort3', 'snowflake', 'socat', 'softethervpn',
+          'softethervpn5', 'softflowd', 'spawn-fcgi', 'speedtest-cli', 'speedtest-go', 'speedtest-netperf',
+          'speedtestcpp', 'spoofer', 'sqm-scripts', 'squid', 'srelay', 'sscep', 'sshfs', 'sshtunnel',
+          'sslh', 'sstp-client', 'static-neighbor-reports', 'strongswan', 'stubby', 'stunnel', 'sub-web',
+          'subconverter', 'subversion', 'switchdev-poller', 'sysrepo', 'sysuh3c', 'tac_plus', 'tailscale',
+          'tayga', 'tcping', 'tcpproxy', 'tcpreplay', 'telnet-bsd', 'tgt', 'tinc', 'tinyfecvpn',
+          'tinyportmapper', 'tinyproxy', 'tmate-ssh-server', 'tmate', 'tor-hs', 'tor', 'torsocks',
+          'trafficshaper', 'transfer', 'transmission-web-control', 'transmission', 'travelmate', 'trojan',
+          'tuic-client', 'tuic-server', 'tunneldigger-broker', 'tunneldigger', 'u2pnpd', 'ua2f', 'uacme',
+          'uanytun', 'udhcpsnoop', 'udp-broadcast-relay-redux-openwrt', 'udp2raw', 'udphp-client',
+          'udpspeeder', 'udptunnel', 'udpxy', 'ulogd', 'umurmur', 'unbound', 'uradvd', 'usbip', 'uspot',
+          'usteer', 'uwsgi', 'v2ray-core', 'v2ray-geodata', 'v2ray-plugin', 'v2raya', 'vallumd', 'vlmcsd',
+          'vnstat', 'vnstat2', 'vpnc-scripts', 'vpnc', 'vsftpd', 'wakeonlan', 'wavemon', 'webui-aria2',
+          'wfb-ng', 'wg-installer', 'wget', 'wgsd', 'wifi-presence', 'wifidog', 'wifischedule', 'wsdd2',
+          'xfrpc', 'xinetd', 'xl2tpd', 'xray-core', 'xray-plugin', 'xtables-addons', 'yggdrasil-jumper',
+          'yggdrasil', 'zerotier', 'znc', 'ztdns'
+        ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup environment
+        run: |
+          sudo timedatectl set-timezone "$TZ"
+          mkdir -p ~/pack
+
+      - name: Check ${{ matrix.package }} for updates
+        id: check_package
+        run: |
+          cd $GITHUB_WORKSPACE/${{ matrix.package }}
+          
+          # Extract current version from Makefile
+          CURRENT_VERSION=$(grep -E '^PKG_VERSION:=' Makefile | head -1 | cut -d= -f2 | tr -d ' ')
+          
+          if [ -z "$CURRENT_VERSION" ]; then
+            echo "❌ Could not extract version for ${{ matrix.package }}"
+            echo "status=skip" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Current version of ${{ matrix.package }}: $CURRENT_VERSION"
+          
+          # Try to get latest version from GitHub API (common pattern)
+          LATEST_VERSION=$(curl -s "https://api.github.com/repos/${{ matrix.package }}/${{ matrix.package }}/releases/latest" 2>/dev/null | \
+            grep '"tag_name":' | head -1 | cut -d'"' -f4 | sed 's/^v//') || true
+          
+          if [ -z "$LATEST_VERSION" ]; then
+            # Fallback: try to get from main project page
+            LATEST_VERSION=$(curl -s "https://api.github.com/repos/${{ matrix.package }}/${{ matrix.package }}/tags" 2>/dev/null | \
+              grep '"name":' | head -1 | cut -d'"' -f4 | sed 's/^v//') || true
+          fi
+          
+          if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" = "$CURRENT_VERSION" ]; then
+            echo "✅ ${{ matrix.package }} is up to date ($CURRENT_VERSION)"
+            echo "status=current" >> $GITHUB_OUTPUT
+          else
+            echo "🔄 ${{ matrix.package }} update available: $CURRENT_VERSION -> $LATEST_VERSION"
+            echo "status=update" >> $GITHUB_OUTPUT
+            echo "new_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update ${{ matrix.package }}
+        if: steps.check_package.outputs.status == 'update'
+        run: |
+          cd $GITHUB_WORKSPACE/${{ matrix.package }}
+          NEW_VERSION=${{ steps.check_package.outputs.new_version }}
+          
+          # Update version in Makefile
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$NEW_VERSION/" Makefile
+          
+          # Download new source and calculate hash
+          cd ~/pack
+          mkdir -p ${{ matrix.package }}
+          cd ${{ matrix.package }}
+          
+          # Try different download patterns
+          DOWNLOAD_URLS=(
+            "https://github.com/${{ matrix.package }}/${{ matrix.package }}/archive/refs/tags/v$NEW_VERSION.tar.gz"
+            "https://github.com/${{ matrix.package }}/${{ matrix.package }}/archive/refs/tags/$NEW_VERSION.tar.gz"
+            "https://codeload.github.com/${{ matrix.package }}/${{ matrix.package }}/tar.gz/v$NEW_VERSION"
+            "https://codeload.github.com/${{ matrix.package }}/${{ matrix.package }}/tar.gz/$NEW_VERSION"
+          )
+          
+          for url in "${DOWNLOAD_URLS[@]}"; do
+            if wget -q --spider "$url"; then
+              wget -O source.tar.gz "$url"
+              NEW_HASH=$(sha256sum source.tar.gz | awk '{print $1}')
+              break
+            fi
+          done
+          
+          if [ -n "$NEW_HASH" ]; then
+            cd $GITHUB_WORKSPACE/${{ matrix.package }}
+            sed -i "s/^PKG_HASH:=.*/PKG_HASH:=$NEW_HASH/" Makefile
+            echo "✅ Updated ${{ matrix.package }} to $NEW_VERSION with hash $NEW_HASH"
+          else
+            echo "❌ Could not download source for ${{ matrix.package }} $NEW_VERSION"
+          fi
+
+      - name: Commit changes
+        if: steps.check_package.outputs.status == 'update'
+        run: |
+          cd $GITHUB_WORKSPACE
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          git add ${{ matrix.package }}/Makefile
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit for ${{ matrix.package }}"
+          else
+            git commit -m "${{ matrix.package }}: update to ${{ steps.check_package.outputs.new_version }}"
+            echo "Committed changes for ${{ matrix.package }}"
+          fi
+
+      - name: Push changes
+        if: steps.check_package.outputs.status == 'update'
+        run: |
+          cd $GITHUB_WORKSPACE
+          git pull --rebase origin main
+          git push origin main
+          echo "Pushed changes for ${{ matrix.package }}"
