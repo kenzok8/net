@@ -43,8 +43,10 @@ jobs:
     runs-on: ubuntu-latest
     name: update-net-packages
     steps:
-      - name: Checkout
+      - name: Checkout with full history
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整的Git历史记录
 
       - name: Setup environment
         run: |
@@ -124,6 +126,9 @@ jobs:
           UPDATED_COUNT=0
           FAILED_COUNT=0
           SKIPPED_COUNT=0
+          
+          # Add set -e to make the script exit immediately if a command fails
+          set -e
           
           for package in "${PACKAGES[@]}"; do
             echo "======================================"
@@ -312,14 +317,5 @@ jobs:
 
       - name: Push all changes
         run: |
-          cd "$GITHUB_WORKSPACE"
-          
-          # Check if there are any commits to push
-          if git log origin/main..HEAD --oneline | grep -q .; then
-            echo "Pushing changes to repository..."
-            git pull --rebase origin main || true
-            git push origin main
-            echo "✅ All changes pushed successfully"
-          else
-            echo "ℹ️  No changes to push"
-          fi
+          git pull --rebase origin main
+          git push
