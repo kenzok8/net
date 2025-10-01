@@ -120,6 +120,7 @@ jobs:
           
           UPDATED_COUNT=0
           FAILED_COUNT=0
+          SKIPPED_COUNT=0
           
           for package in "${PACKAGES[@]}"; do
             echo "======================================"
@@ -129,100 +130,181 @@ jobs:
             # Check if package directory exists
             if [ ! -d "$GITHUB_WORKSPACE/$package" ]; then
               echo "⚠️  Directory not found for $package, skipping..."
+              ((SKIPPED_COUNT++))
               continue
             fi
             
             cd "$GITHUB_WORKSPACE/$package"
             
+            # Check if Makefile exists
+            if [ ! -f "Makefile" ]; then
+              echo "⚠️  Makefile not found for $package, skipping..."
+              ((SKIPPED_COUNT++))
+              continue
+            fi
+            
             # Extract current version from Makefile
-            CURRENT_VERSION=$(grep -E '^PKG_VERSION:=' Makefile 2>/dev/null | head -1 | cut -d= -f2 | tr -d ' ')
+            CURRENT_VERSION=$(grep -E '^PKG_VERSION:=|^PKG_VERSION ?:=' Makefile 2>/dev/null | head -1 | sed 's/PKG_VERSION[[:space:]]*:=[[:space:]]*//' | tr -d ' ')
             
             if [ -z "$CURRENT_VERSION" ]; then
-              echo "❌ Could not extract version for $package"
-              ((FAILED_COUNT++))
+              echo "⚠️  Could not extract version for $package, skipping..."
+              ((SKIPPED_COUNT++))
               continue
             fi
             
             echo "Current version: $CURRENT_VERSION"
             
+            # Extract PKG_SOURCE_URL from Makefile to get the real GitHub repo
+            SOURCE_URL=$(grep -E '^PKG_SOURCE_URL:=|^PKG_SOURCE_URL ?:=' Makefile 2>/dev/null | head -1 | sed 's/PKG_SOURCE_URL[[:space:]]*:=[[:space:]]*//')
+            
+            if [ -z "$SOURCE_URL" ]; then
+              echo "⚠️  Could not extract source URL for $package, skipping..."
+              ((SKIPPED_COUNT++))
+              continue
+            fi
+            
+            echo "Source URL: $SOURCE_URL"
+            
+            # Extract GitHub repo from URL (support multiple formats)
+            GITHUB_REPO=""
+            if [[ "$SOURCE_URL" =~ github\.com[:/]([^/]+/[^/]+) ]]; then
+              GITHUB_REPO="${BASH_REMATCH[1]}"
+              GITHUB_REPO="${GITHUB_REPO%.git}"
+            fi
+            
+            if [ -z "$GITHUB_REPO" ]; then
+              echo "⚠️  Not a GitHub source or cannot parse repo for $package, skipping..."
+              ((SKIPPED_COUNT++))
+              continue
+            fi
+            
+            echo "GitHub repo: $GITHUB_REPO"
+            
             # Try to get latest version from GitHub API
-            LATEST_VERSION=$(curl -s "https://api.github.com/repos/$package/$package/releases/latest" 2>/dev/null | \
+            LATEST_VERSION=""
+            
+            # Method 1: Try releases/latest
+            LATEST_VERSION=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/$GITHUB_REPO/releases/latest" 2>/dev/null | \
               grep '"tag_name":' | head -1 | cut -d'"' -f4 | sed 's/^v//') || true
             
+            # Method 2: If no release, try tags
             if [ -z "$LATEST_VERSION" ]; then
-              # Fallback: try to get from tags
-              LATEST_VERSION=$(curl -s "https://api.github.com/repos/$package/$package/tags" 2>/dev/null | \
+              LATEST_VERSION=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                "https://api.github.com/repos/$GITHUB_REPO/tags" 2>/dev/null | \
                 grep '"name":' | head -1 | cut -d'"' -f4 | sed 's/^v//') || true
             fi
             
             if [ -z "$LATEST_VERSION" ]; then
               echo "⚠️  Could not fetch latest version for $package"
+              ((SKIPPED_COUNT++))
               continue
             fi
             
+            echo "Latest version: $LATEST_VERSION"
+            
+            # Compare versions
             if [ "$LATEST_VERSION" = "$CURRENT_VERSION" ]; then
               echo "✅ $package is up to date ($CURRENT_VERSION)"
               continue
             fi
             
+            # Check if this is actually a newer version (simple string comparison)
+            if [[ "$LATEST_VERSION" < "$CURRENT_VERSION" ]]; then
+              echo "⚠️  Latest version ($LATEST_VERSION) seems older than current ($CURRENT_VERSION), skipping..."
+              ((SKIPPED_COUNT++))
+              continue
+            fi
+            
             echo "🔄 Update available: $CURRENT_VERSION -> $LATEST_VERSION"
             
-            # Update version in Makefile
-            sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$LATEST_VERSION/" Makefile
+            # Create backup of Makefile
+            cp Makefile Makefile.backup
             
-            # Download new source and calculate hash
+            # Update version in Makefile
+            sed -i "s/^PKG_VERSION[[:space:]]*:=[[:space:]]*.*$/PKG_VERSION:=$LATEST_VERSION/" Makefile
+            
+            # Try to download and get hash
             cd ~/pack
             rm -rf "$package"
             mkdir -p "$package"
             cd "$package"
             
-            # Try different download patterns
             DOWNLOAD_SUCCESS=false
-            DOWNLOAD_URLS=(
-              "https://github.com/$package/$package/archive/refs/tags/v$LATEST_VERSION.tar.gz"
-              "https://github.com/$package/$package/archive/refs/tags/$LATEST_VERSION.tar.gz"
-              "https://codeload.github.com/$package/$package/tar.gz/v$LATEST_VERSION"
-              "https://codeload.github.com/$package/$package/tar.gz/$LATEST_VERSION"
+            NEW_HASH=""
+            
+            # Build possible download URLs based on SOURCE_URL pattern
+            DOWNLOAD_URLS=()
+            
+            # If SOURCE_URL contains \$(PKG_VERSION), replace it
+            if [[ "$SOURCE_URL" =~ \$\(PKG_VERSION\) ]]; then
+              BASE_URL="${SOURCE_URL//\$(PKG_VERSION)/$LATEST_VERSION}"
+              DOWNLOAD_URLS+=("$BASE_URL")
+            fi
+            
+            # Add standard GitHub archive URLs
+            DOWNLOAD_URLS+=(
+              "https://github.com/$GITHUB_REPO/archive/refs/tags/v$LATEST_VERSION.tar.gz"
+              "https://github.com/$GITHUB_REPO/archive/refs/tags/$LATEST_VERSION.tar.gz"
+              "https://codeload.github.com/$GITHUB_REPO/tar.gz/v$LATEST_VERSION"
+              "https://codeload.github.com/$GITHUB_REPO/tar.gz/$LATEST_VERSION"
             )
             
+            # Try each download URL
             for url in "${DOWNLOAD_URLS[@]}"; do
-              if wget -q --spider "$url" 2>/dev/null; then
-                if wget -q -O source.tar.gz "$url" 2>/dev/null; then
+              echo "Trying: $url"
+              if wget -q --timeout=30 --tries=2 -O source.tar.gz "$url" 2>/dev/null; then
+                if [ -f source.tar.gz ] && [ -s source.tar.gz ]; then
                   NEW_HASH=$(sha256sum source.tar.gz | awk '{print $1}')
-                  DOWNLOAD_SUCCESS=true
-                  break
+                  if [ -n "$NEW_HASH" ]; then
+                    DOWNLOAD_SUCCESS=true
+                    echo "✓ Downloaded successfully"
+                    break
+                  fi
                 fi
               fi
             done
             
+            cd "$GITHUB_WORKSPACE/$package"
+            
             if [ "$DOWNLOAD_SUCCESS" = true ] && [ -n "$NEW_HASH" ]; then
-              cd "$GITHUB_WORKSPACE/$package"
-              sed -i "s/^PKG_HASH:=.*/PKG_HASH:=$NEW_HASH/" Makefile
+              # Update hash in Makefile
+              if grep -q "^PKG_HASH" Makefile; then
+                sed -i "s/^PKG_HASH[[:space:]]*:=[[:space:]]*.*$/PKG_HASH:=$NEW_HASH/" Makefile
+              elif grep -q "^PKG_MD5SUM" Makefile; then
+                # Some packages might use MD5, skip hash update
+                echo "⚠️  Package uses MD5SUM, skipping hash update"
+              fi
               
               # Commit changes
               git add Makefile
               
               if ! git diff --staged --quiet; then
-                git commit -m "$package: update to $LATEST_VERSION"
+                git commit -m "$package: update to $LATEST_VERSION" || true
                 echo "✅ Updated $package to $LATEST_VERSION"
                 ((UPDATED_COUNT++))
+              else
+                echo "⚠️  No changes detected after update"
+                ((SKIPPED_COUNT++))
               fi
+              
+              # Remove backup
+              rm -f Makefile.backup
             else
               echo "❌ Could not download source for $package $LATEST_VERSION"
-              # Revert version change
-              cd "$GITHUB_WORKSPACE/$package"
-              git checkout Makefile 2>/dev/null || true
+              # Restore from backup
+              mv Makefile.backup Makefile
               ((FAILED_COUNT++))
             fi
             
-            # Clean up
             cd "$GITHUB_WORKSPACE"
           done
           
           echo "======================================"
           echo "Summary:"
-          echo "Updated packages: $UPDATED_COUNT"
-          echo "Failed packages: $FAILED_COUNT"
+          echo "✅ Updated packages: $UPDATED_COUNT"
+          echo "❌ Failed packages: $FAILED_COUNT"
+          echo "⚠️  Skipped packages: $SKIPPED_COUNT"
           echo "======================================"
 
       - name: Push all changes
